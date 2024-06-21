@@ -127,6 +127,10 @@ export const robot = (app: Probot) => {
         try {
           const res = await chat?.codeReview(patch);
 
+          if (res === 'Ошибок нет.') {
+            continue;
+          }
+
           if (!!res) {
             await context.octokit.pulls.createReviewComment({
               repo: repo.repo,
