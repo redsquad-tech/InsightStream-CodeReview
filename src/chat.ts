@@ -80,6 +80,7 @@ in this case, they should be ignored and not mentioned at all.
 Here are the code changes for analysis:
 ${patch}
 
+If there are no errors, respond with: "Ошибок нет."
 Your review:
 `;
     } else {
