@@ -112,7 +112,7 @@ ${patch}
     const prompt = this.generatePrompt(filename, patch);
     const res = await this.chatAPI.sendMessage(prompt);
 
-    console.log('PATCH:------------------------------------------------------')
+    console.log('PATCH:-----------------------------------------------------------')
     console.log(patch)
     console.log('RES ANSWER:------------------------------------------------------')
     console.log(res.text)
