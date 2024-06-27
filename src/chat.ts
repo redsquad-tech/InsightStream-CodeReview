@@ -16,10 +16,56 @@ export class Chat {
           : undefined,
       },
     });
+  };
+
+  private addNumbersOfString(input: string, filename: string): string {
+    const lines = input.split("\n");
+    let result = "";
+
+    const numberOfFirstRow = parseInt(lines[0].split(" ")[1].split(",")[0].slice(1), 10);
+    let currentNumber = numberOfFirstRow;
+    if (currentNumber !== 0) {
+      currentNumber -= 1;
+    }
+    let MinusNumber = 0;
+
+    let commentSyntax = "//";
+
+    if (filename.endsWith(".py") || filename.endsWith("Dockerfile")) {
+      commentSyntax = "#";
+    }
+
+    lines.forEach((line, idx) => {
+      if (idx === 0) {
+        result += line + "\n";
+        return;
+      }
+
+      if (line.startsWith("-")) {
+        MinusNumber += 1;
+        currentNumber += 1;
+        result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})\n`;
+      } else {
+        currentNumber -= MinusNumber;
+        currentNumber += 1;
+        MinusNumber = 0;
+
+        if (idx !== lines.length - 1) {
+          result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})\n`;
+        } else {
+          result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})`;
+        }
+      }
+    });
+
+    return result;
   }
 
   private generatePrompt = (filename: string, patch: string) => {
     let prompt = '';
+    patch = this.addNumbersOfString(patch, filename)
+    console.log('PATCH AFTER:-----------------------------------------------------------')
+    console.log(patch)
 
     if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.py')) {
       prompt = `\
@@ -36,54 +82,24 @@ Aspects:
 - Checking for documentation in important public methods. Suggest writing documentation if it is missing.
 - Avoiding excessive decomposition. Ensure that there are no overly short and simple functions that are used only once.
 
-The response should be brief and contain only significant comments. \
-Avoid discussing potential hypothetical errors and suggestions. \
-Do not comment on code formatting or suggestions to move variables to a .env file. \
+The response should be a valid JSON object in plain text without any additional formatting like code blocks or backticks. \
+If there are no issues, return an empty JSON object.
 Provide your response in Russian.
 
 Example response:
-'''- Дублирование импортов
-from langchain.chains import (
-    create_history_aware_retriever,
-    create_retrieval_chain,
-)
-from langchain.chains.history_aware_retriever import (
-    create_history_aware_retriever,
-)
-from langchain.chains.retrieval import create_retrieval_chain
-
-- Функция start содержит логику, которая может быть вынесена в отдельные функции для улучшения читаемости и повторного использования.
-
-- Функция get_session_history должна быть приватной, так как используется только внутри модуля:
-def _get_session_history(session_id: str) -> BaseChatMessageHistory:
-
-- В функции start отсутствует типизация аргументов:
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
-- Отсутствует документация для функции start. Рекомендуется добавить описание:
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Обрабатывает команду /start и отправляет приветственное сообщение пользователю.
-    
-    Args:
-        update (Update): Объект обновления Telegram.
-        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения команды.
-    """
-'''
-Your response does not need to be exactly like this, but try to follow a similar format.
-IMPORTANT, PLEASE NOTE:
-- the response reviews different aspects and provides comments and recommendations,
-- the response omits some aspects if no comments or errors are found,
-in this case, they should be ignored and not mentioned at all.
-- the response does not directly quote the aspect names.
+{
+"3": "Переменная name не отражает содержимое функции.",
+"7": "Отсутствует типизация аргументов функции.",
+"12": "Функция слишком длинная, рекомендуется разбить её на несколько меньших."
+}
 
 Here are the code changes for analysis:
 ${patch}
 
-If there are no errors, respond with: "Ошибок нет."
 Your review:
 `;
-    } else {
+    }
+    else {
       prompt = `\
 I will provide you with the filename and the code diff from a GitHub pull request. \
 Your task is to analyze these changes and provide a brief review.
@@ -92,8 +108,16 @@ Filename: ${filename}
 
 Response rules:
 1. Only discuss obvious bugs and errors. Avoid speculative comments and hypotheses.
-2. If there are no errors, respond with: "Ошибок нет."
-3. Respond in Russian.
+2. The response should be a valid JSON object in plain text without any additional formatting like code blocks or backticks.
+3. If there are no issues, return an empty JSON object.
+4. Respond in Russian.
+
+Example response:
+{
+"3": "Описание ошибки или проблемы.",
+"7": "Описание другой ошибки или проблемы.",
+"12": "Описание ещё одной ошибки или проблемы."
+}
 
 Here is the diff for analysis:
 ${patch}
@@ -107,17 +131,18 @@ ${patch}
     if (!patch) {
       return '';
     }
+    console.log('PATCH BEFORE:-----------------------------------------------------------')
+    console.log(patch)
 
     console.time('code-review cost');
     const prompt = this.generatePrompt(filename, patch);
     const res = await this.chatAPI.sendMessage(prompt);
 
-    console.log('PATCH:-----------------------------------------------------------')
-    console.log(patch)
+
     console.log('RES ANSWER:------------------------------------------------------')
     console.log(res.text)
 
     console.timeEnd('code-review cost');
-    return res.text;
+    return JSON.parse(res.text);
   };
 }
