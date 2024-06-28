@@ -16,75 +16,132 @@ export class Chat {
           : undefined,
       },
     });
+  };
+
+  private addNumbersOfString(input: string, filename: string): string {
+    const lines = input.split("\n");
+    let result = "";
+
+    let currentNumber = parseInt(lines[0].split(" ")[1].split(",")[0].slice(1), 10);
+    if (currentNumber !== 0) {
+      currentNumber -= 1;
+    }
+
+    let minusNumber = 0;
+
+    let commentSyntax = "//";
+    if (filename.endsWith(".py") || filename.endsWith("Dockerfile")) {
+      commentSyntax = "#";
+    }
+
+    lines.forEach((line, idx) => {
+      if (idx === 0) {
+        result += line.split(" @@ ")[0] + " @@\n";
+        return;
+      }
+
+      if (line.startsWith("-")) {
+        minusNumber += 1;
+        currentNumber += 1;
+        result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})\n`;
+      } else {
+        if (line.startsWith("@")) {
+          currentNumber = parseInt(line.split(" ")[1].split(",")[0].slice(1), 10) - 1;
+          result += "...\n\n\n...\n";
+          result += line.split(" @@ ")[0] + " @@\n";
+          return;
+        }
+        currentNumber -= minusNumber;
+        currentNumber += 1;
+        minusNumber = 0;
+
+        if (idx !== lines.length - 1) {
+          result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})\n`;
+        } else {
+          result += `${line} ${commentSyntax} (Номер строки: ${currentNumber})`;
+        }
+      }
+    });
+
+    return result;
+  }
+
+  private splitPatchIntoChunks(patch: string, maxLength: number): string[] {
+    const lines = patch.split('\n');
+    let currentChunk = '';
+    const chunks: string[] = [];
+
+    for (const line of lines) {
+      if (currentChunk.length + line.length > maxLength) {
+        chunks.push(currentChunk.trim());
+        currentChunk = '...\n';
+      }
+
+      currentChunk += line + '\n';
+    }
+
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+
+    return chunks;
   }
 
   private generatePrompt = (filename: string, patch: string) => {
-    let prompt = '';
+    patch = this.addNumbersOfString(patch, filename)
+    // console.log('PATCH AFTER:-----------------------------------------------------------')
+    // console.log(patch)
 
-    if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.py')) {
-      prompt = `\
+    return this.splitPatchIntoChunks(patch, 3000).map((chunk) => {
+      const commentSyntax = filename.endsWith('.py') || filename.endsWith('Dockerfile') ? '#' : '//';
+      const continuationWarning = chunk.startsWith('...') ? `
+Note: This patch is a continuation of a previous chunk. \
+There might be cases where functions or variables are used here but defined in the previous chunk. \
+Please take this into account and avoid commenting on undefined variables or functions that might be defined in previous chunks.
+` : '';
+
+      if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.py')) {
+        return `\
 Review the provided code changes in the file "${filename}". \
 Evaluate only the specified aspects.
-IMPORTANT: If there are no issues for a particular aspect, completely ignore that aspect and do not mention it at all.
 
 Aspects:
 - Errors and bugs in the code.
 - Checking the correspondence of function and variable names to their content. Indicate if the names do not reflect the content.
 - Analysis of function decomposition in complex algorithms. Ensure that each function is easily describable and does not contain code repetitions.
-- Identification of methods that should be private but are not marked as such. If a function name starts with an underscore, it means it's a private method.
+- Identification of methods that should be private but are not marked as such.
 - Checking for type annotations in public methods. Suggest types if they are missing.
 - Checking for documentation in important public methods. Suggest writing documentation if it is missing.
 - Avoiding excessive decomposition. Ensure that there are no overly short and simple functions that are used only once.
 
-The response should be brief and contain only significant comments. \
-Avoid discussing potential hypothetical errors and suggestions. \
-Do not comment on code formatting or suggestions to move variables to a .env file. \
+Each line of the provided patch includes the line number at the end in the format "${commentSyntax} (Номер строки: N)". \
+Please carefully track the line number when writing your comments to ensure accuracy. \
+Each comment should reference the specific line number it is addressing.
+
+The response should be a valid JSON object in plain text without any additional formatting like code blocks or backticks. \
+The keys in the JSON should correspond to the line numbers, and the values should be the review comments with suggestions for corrections. \
+If there are no issues, return an empty JSON object.
 Provide your response in Russian.
+${continuationWarning}
+In each comment, you must include a suggestion on how to fix the issue. \
+For example, if you mention that a function lacks documentation, write the documentation yourself and suggest it. \
+The same applies to all other aspects.
 
 Example response:
-'''- Дублирование импортов
-from langchain.chains import (
-    create_history_aware_retriever,
-    create_retrieval_chain,
-)
-from langchain.chains.history_aware_retriever import (
-    create_history_aware_retriever,
-)
-from langchain.chains.retrieval import create_retrieval_chain
-
-- Функция start содержит логику, которая может быть вынесена в отдельные функции для улучшения читаемости и повторного использования.
-
-- Функция get_session_history должна быть приватной, так как используется только внутри модуля:
-def _get_session_history(session_id: str) -> BaseChatMessageHistory:
-
-- В функции start отсутствует типизация аргументов:
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
-- Отсутствует документация для функции start. Рекомендуется добавить описание:
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Обрабатывает команду /start и отправляет приветственное сообщение пользователю.
-    
-    Args:
-        update (Update): Объект обновления Telegram.
-        context (ContextTypes.DEFAULT_TYPE): Контекст выполнения команды.
-    """
-'''
-Your response does not need to be exactly like this, but try to follow a similar format.
-IMPORTANT, PLEASE NOTE:
-- the response reviews different aspects and provides comments and recommendations,
-- the response omits some aspects if no comments or errors are found,
-in this case, they should be ignored and not mentioned at all.
-- the response does not directly quote the aspect names.
+{
+"3": "Переменная name не отражает содержимое функции.",
+"7": "Отсутствует типизация аргументов функции.",
+"12": "Функция слишком длинная, рекомендуется разбить её на несколько меньших."
+}
 
 Here are the code changes for analysis:
-${patch}
+${chunk}
 
-If there are no errors, respond with: "Ошибок нет."
 Your review:
 `;
-    } else {
-      prompt = `\
+      }
+      else {
+        return `\
 I will provide you with the filename and the code diff from a GitHub pull request. \
 Your task is to analyze these changes and provide a brief review.
 
@@ -92,32 +149,61 @@ Filename: ${filename}
 
 Response rules:
 1. Only discuss obvious bugs and errors. Avoid speculative comments and hypotheses.
-2. If there are no errors, respond with: "Ошибок нет."
-3. Respond in Russian.
+2. The response should be a valid JSON object in plain text without any additional formatting like code blocks or backticks.
+3. If there are no issues, return an empty JSON object.
+4. Respond in Russian.
+
+Each line of the provided patch includes the line number at the end in the format "${commentSyntax} (Номер строки: N)". \
+Please carefully track the line number when writing your comments to ensure accuracy. \
+Each comment should reference the specific line number it is addressing.
+The keys in the JSON should correspond to the line numbers, and the values should be the review comments with suggestions for corrections.
+${continuationWarning}
+In each comment, you must include a suggestion on how to fix the issue.
+
+Example response:
+{
+"3": "Описание ошибки или проблемы.",
+"7": "Описание другой ошибки или проблемы.",
+"12": "Описание ещё одной ошибки или проблемы."
+}
 
 Here is the diff for analysis:
-${patch}
+${chunk}
 `;
-    }
-
-    return prompt;
+      }
+    });
   };
 
   public codeReview = async (filename: string, patch: string) => {
     if (!patch) {
       return '';
     }
+    // console.log('PATCH BEFORE:-----------------------------------------------------------')
+    // console.log(patch)
 
     console.time('code-review cost');
-    const prompt = this.generatePrompt(filename, patch);
-    const res = await this.chatAPI.sendMessage(prompt);
+    const prompts = this.generatePrompt(filename, patch);
+    console.log('PROMPTS:-----------------------------------------------------------')
+    console.log(prompts)
 
-    console.log('PATCH:-----------------------------------------------------------')
-    console.log(patch)
-    console.log('RES ANSWER:------------------------------------------------------')
-    console.log(res.text)
+    const responses = await Promise.all(prompts.map(prompt => this.chatAPI.sendMessage(prompt)));
 
     console.timeEnd('code-review cost');
-    return res.text;
+
+    const combinedResponse: Record<string, string> = {};
+    for (const response of responses) {
+      try {
+        const cleanedResponse = response.text.replace(/```json|```/g, '').trim();
+        const jsonResponse = JSON.parse(cleanedResponse);
+        Object.assign(combinedResponse, jsonResponse);
+      } catch (error) {
+        console.error('Failed to parse JSON response:', error);
+      }
+    }
+
+    console.log('RES ANSWER:------------------------------------------------------')
+    console.log(JSON.stringify(combinedResponse, null, 2));
+
+    return combinedResponse;
   };
 }
