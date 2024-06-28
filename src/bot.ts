@@ -7,6 +7,13 @@ const MAX_PATCH_COUNT = process.env.MAX_PATCH_LENGTH
   ? +process.env.MAX_PATCH_LENGTH
   : Infinity;
 
+const IGNORED_FILE_EXTENSIONS = [
+  '.doc', '.docx', '.pdf', '.jpeg', '.jpg', '.png', '.gif', '.bmp',
+  '.tiff', '.tif', '.mp3', '.wav', '.flac', '.aac', '.ogg',
+  '.mp4', '.avi', '.mov', '.mkv', '.wmv',
+  '.zip', '.rar', '.tar', '.gz', '.7z', '.iso'
+];
+
 export const robot = (app: Probot) => {
   const loadChat = async (context: Context) => {
     if (process.env.OPENAI_API_KEY) {
@@ -118,6 +125,11 @@ export const robot = (app: Probot) => {
           continue;
         }
 
+        if (IGNORED_FILE_EXTENSIONS.some(ext => file.filename.endsWith(ext))) {
+          console.log(`${file.filename} skipped due to its file type.`);
+          continue;
+        }
+
         if (!patch || patch.length > MAX_PATCH_COUNT) {
           console.log(
             `${file.filename} skipped caused by its diff is too large`
@@ -127,19 +139,19 @@ export const robot = (app: Probot) => {
         try {
           const res = await chat?.codeReview(file.filename, patch);
 
-          if (res === 'Ошибок нет.') {
+          if (Object.keys(res).length === 0) {
             continue;
           }
 
-          if (!!res) {
+          for (const [line, comment] of Object.entries(res)) {
             await context.octokit.pulls.createReviewComment({
               repo: repo.repo,
               owner: repo.owner,
               pull_number: context.pullRequest().pull_number,
               commit_id: commits[commits.length - 1].sha,
               path: file.filename,
-              body: res,
-              position: patch.split('\n').length - 1,
+              body: comment as string,
+              line: parseInt(line, 10),
             });
           }
         } catch (e) {
